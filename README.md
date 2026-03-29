@@ -1,222 +1,215 @@
-# 🏎️ E116 Autonomous Race Car — Lab Week 1
+# 🏎️ E116 Autonomous Race Car — Hardware Bring-Up & Software Setup
+
+A 1/16-scale autonomous race car built on a **Traxxas E-Revo** chassis, powered by an **NVIDIA Jetson Orin Nano** running Ubuntu Linux. This repo documents the full bring-up process — from inspecting the hardware and measuring power rails to booting into Ubuntu and getting the first Python script running on the Jetson.
 
 ![Lab Setup Banner](Lehigh_Lab1.jpg)
-<!-- Replace: wide shot of the car + monitor on the lab bench -->
+<!-- Replace: wide shot of the car on the bench with the NVIDIA boot screen on the monitor -->
 
 ---
 
-## 📋 Table of Contents
+## What This Project Is
 
-- [Overview](#overview)
-- [Part 1 — Hardware](#part-1--hardware)
-  - [1.1 Lab Environment Setup](#11-lab-environment-setup)
-  - [1.2 Car Components](#12-car-components)
-  - [1.3 Component Deep Dive](#13-component-deep-dive)
-  - [1.4 Power Test](#14-power-test)
-- [Part 2 — Software](#part-2--software)
-  - [2.1 Ubuntu Basics](#21-ubuntu-basics)
-  - [2.2 Linux Commands](#22-linux-commands)
-  - [2.3 Text Editors](#23-text-editors)
-- [Carrier Board Reference](#carrier-board-reference)
-- [Safety Rules](#safety-rules)
-- [Repository Structure](#repository-structure)
+The E116 is a small-scale autonomous vehicle platform designed for experimenting with GPU-accelerated perception, motor control, and embedded Linux. The car uses:
+
+- **NVIDIA Jetson Orin Nano (8 GB)** for onboard compute
+- **Intel RealSense D435** stereo camera for depth perception
+- **Velineon 380 brushless motor** with an ESC for propulsion
+- **TQi 2.4 GHz RC handheld** for manual override
+- A **custom carrier board (LU v2.1)** that handles power management, sensor interfaces, drive-train PWM, and status monitoring
+
+This write-up covers Week 1: getting the car assembled, powered on, and the Jetson booted into a usable Linux environment.
 
 ---
 
-## Overview
+## Hardware Overview
 
-The **E116** is a 1/16-scale autonomous race car built on a Traxxas E-Revo chassis with an NVIDIA Jetson Orin Nano for GPU-accelerated edge compute, an Intel RealSense stereo camera for depth perception, and a custom carrier board handling power management, sensor interfaces, and drive-train control.
+### The Platform
 
-This guide walks through hardware identification, voltage measurements, booting the Jetson into Ubuntu, and basic Linux terminal operations.
+The base is a **Traxxas 1/16 E-Revo VXL** — a small all-wheel-drive car with Ackerman steering geometry. The stock Traxxas electronics (ESC, receiver) are retained for manual control, while the Jetson and carrier board sit on top for autonomous operation.
+
+![Car Top View](assets/images/car_top_view.jpg)
+<!-- Replace: top-down photo of the fully assembled car -->
+
+![Car Side View](assets/images/car_side_view.jpg)
+<!-- Replace: side-angle photo showing the wheel/suspension and mounted boards -->
+
+### Bill of Materials
+
+| Component | Model | Est. Cost | Role |
+|-----------|-------|-----------|------|
+| Chassis | Traxxas 1/16 E-Revo VXL TSM | $ ___ | AWD platform with Ackerman steering |
+| Motor | Velineon® 380 (brushless) | $ ___ | Propulsion — no brushes, higher efficiency |
+| RC Controller | TQi 2.4 GHz TSM | $ ___ | Manual override / safety kill |
+| LiPo Battery | OVONIC | $ ___ | Main power, high energy density |
+| NiMH Battery | Traxxas | $ ___ | Backup / RC receiver power |
+| LiPo Charger | OVONIC X1, 200 W | $ ___ | Charges LiPo packs |
+| Dual Charger | Traxxas EZ-Peak 8A 3S | $ ___ | Charges NiMH and LiPo |
+| Stereo Camera | Intel RealSense D435 | $ ___ | Depth + RGB, stereo baseline for 3D |
+| Compute Module | NVIDIA Jetson Orin Nano 8 GB | $ ___ | GPU edge compute, runs Ubuntu |
+| Carrier Board | LU v2.1 | ~$105 | Power mgmt, I2C/UART, drive control, OLED |
+
+> The full-scale E116 platform uses a **LiDAR** sensor and a **VESC** motor controller instead of the stereo camera and stock Traxxas ESC. The trade-offs are interesting — LiDAR gives precise range data but costs significantly more, and the VESC allows fine-grained current-based torque control that the stock ESC can't do.
 
 ---
 
-## Part 1 — Hardware
+## Step 1 — Power Rail Verification
 
-### 1.1 Lab Environment Setup
+Before powering anything on the car, I verified the power supply chain with a **Digital Multimeter** (Fluke 8800A / GwInstek GDM-8245).
 
-![DMM Setup](.jpg)
-<!-- Replace: photo of the Fluke 8800A or GwInstek DMM with probes connected -->
+### AC Side
 
-1. Locate the **120 V AC outlet** on the bench.
-2. Plug in the AC-DC power converter, then disconnect the converter from the cord (leave the cord in the wall).
-3. Find the **Digital Multimeter** (Fluke 8800A or GwInstek GDM-8245). Insert the red and black probes into the top-left socket. Power on the DMM.
+Plugged the power cord into the 120 V wall outlet, left the converter disconnected. Measured across the cord terminals in **AC V** mode.
 
-#### AC Measurement
+![AC Measurement](assets/images/ac_measurement.jpg)
+<!-- Replace: photo of DMM probes measuring the AC power cord voltage -->
 
-4. Press **AC V** on the DMM.
-5. Measure the open power cord voltage. Record the value.
+**Reading:** ~120 V RMS at 60 Hz — as expected for a US wall outlet.
 
-![AC Voltage Measurement](assets/images/ac_measurement.jpg)
-<!-- Replace: photo of DMM probes on the AC power cord -->
+### DC Side
 
-#### DC Measurement
+Connected the AC-DC converter and switched the DMM to **DC V** mode. Measured the barrel connector output.
 
-6. Reconnect the converter to the power cord.
-7. Press **DC V** on the DMM.
-8. Measure the barrel connector output voltage. Compare against the converter label.
-
-![DC Voltage Measurement](assets/images/dc_measurement.jpg)
+![DC Measurement](assets/images/dc_measurement.jpg)
 <!-- Replace: photo of DMM probes on the barrel connector output -->
 
----
+**Reading:** matched the label on the converter (typically 19 V DC for Jetson power supplies). This is the voltage that feeds the carrier board's main power input.
 
-### 1.2 Car Components
-
-| Component | Model | Est. Price | Notes |
-|-----------|-------|------------|-------|
-| Traxxas 1/16 Car | 1/16 E-Revo VXL TSM | $ ___ | AWD chassis, Ackerman steering |
-| Brushless Motor | Velineon® 380 | $ ___ | No contact brushes, higher efficiency |
-| RC Handheld | TQi 2.4 GHz TSM | $ ___ | Manual override control |
-| Dual Battery Charger | EZ-Peak 8A 3S | $ ___ | Traxxas |
-| LiPo Battery Charger | X1, 200 W | $ ___ | OVONIC |
-| LiPo Battery | OVONIC | $ ___ | High energy density, rechargeable |
-| NiMH Battery | Traxxas | $ ___ | Lower density than LiPo |
-| Stereo Camera | Intel RealSense D435 | $ ___ | Depth + RGB stereo vision |
-| Jetson Dev Kit | Orin Nano 8 GB | $ ___ | NVIDIA GPU edge compute |
-| Carrier Board | LU v2.1 | ~$105 | Power mgmt, sensor I/F, drive-train ctrl |
-
-![Car Components Annotated](assets/images/car_components_annotated.jpg)
-<!-- Replace: annotated top-down photo of the car with arrows to each component -->
+![DMM Closeup](assets/images/dmm_closeup.jpg)
+<!-- Replace: closeup of the DMM display showing the DC voltage reading -->
 
 ---
 
-### 1.3 Component Deep Dive
+## Step 2 — Car Assembly Inspection
 
-1. Pick **3 components** from the table. Research their specs, unique features, and market competitors.
-2. The full-scale E116 platform uses a **LiDAR sensor** (instead of stereo camera) and a **VESC** (instead of the stock Traxxas ESC). Consider how these alternatives compare in cost, accuracy, and integration complexity.
+Before first power-on, I went over the car checking for:
 
-![Component Comparison](assets/images/component_comparison.jpg)
-<!-- Replace: side-by-side photo or diagram comparing sensor/ESC alternatives -->
+- Loose screws on the carrier board standoffs and Jetson mounting
+- Secure wire connections — battery leads, motor wires, servo cable
+- Proper polarity on all DC connections (red → V+, black → GND)
+- Camera mounted and cable seated in the USB port
+- No metal debris or loose parts that could short anything
+
+![Inspection — Wiring](assets/images/inspection_wiring.jpg)
+<!-- Replace: photo showing the wiring harness / connections on the car -->
+
+![Inspection — Mounting](assets/images/inspection_mounting.jpg)
+<!-- Replace: photo of the Jetson + carrier board mounted on the chassis -->
+
+Everything looked solid. A couple of screws on the carrier board standoffs were slightly loose — tightened those before proceeding.
 
 ---
 
-### 1.4 Power Test
+## Step 3 — First Power-On
 
-![Car Powered On — NVIDIA Boot Screen](assets/images/car_powered_on.jpg)
-<!-- Replace with your photo (e.g. Lehigh_Lab1.jpg) showing the car next to the NVIDIA splash -->
+### Boot Sequence
 
-**Procedure:**
+1. Connected a monitor (DisplayPort), USB keyboard, and mouse to the Orin Nano.
+2. Plugged the AC-DC converter barrel into the **Main Barrel** on the carrier board.
+3. **Main LED** turned on immediately — good, power is reaching the board.
+4. Pressed the **Jetson Power** button and flipped the **Drive-train Power Switch**.
 
-1. Inspect the car for loose screws, wires, or connections. Fix anything out of place.
-2. Connect **monitor** (DisplayPort), **keyboard**, and **mouse** to the Orin Nano.
-3. Plug the AC-DC converter into the **Main Barrel** on the carrier board → Main LED turns on.
-4. Press the **Jetson Power** button. Flip the **Drive-train Power Switch**. Verify:
-   - Status LEDs 1–3 are lit
-   - Green light on the Orin Nano
-   - Fan is spinning
-5. Power on the **RC handheld** near the car. Confirm:
-   - RC receiver LED turns **green**
-   - Status LED 4 turns on
-6. Turn off RC power.
-7. Wait ~2 minutes. Switch the monitor input to **DisplayPort**.
-8. You should see the NVIDIA logo, then the Ubuntu login screen.
+What I saw:
+- ✅ Status LEDs 1–3 lit up
+- ✅ Green LED on the Orin Nano module
+- ✅ Fan spun up
 
-<!-- VIDEO: Boot sequence from power button press to Ubuntu login -->
+![Power On — LEDs](assets/images/power_on_leds.jpg)
+<!-- Replace: photo of the carrier board with status LEDs lit -->
+
+### RC Link Test
+
+5. Powered on the **TQi RC handheld** near the car.
+6. RC receiver LED turned **green**, and **Status LED 4** came on — link established.
+7. Turned off RC power immediately after confirming the link.
+
+![RC Link](assets/images/rc_link.jpg)
+<!-- Replace: photo showing the RC handheld and the green receiver LED on the car -->
+
+### Ubuntu Boot
+
+8. Waited ~2 minutes for the Jetson to boot.
+9. Switched the Dell monitor input to **DisplayPort**.
+10. NVIDIA splash screen appeared, followed by the Ubuntu login window.
+
+![NVIDIA Boot Screen](assets/images/nvidia_boot_screen.jpg)
+<!-- Replace: your Lehigh_Lab1.jpg — the car next to the monitor showing the NVIDIA splash -->
+
+<!-- VIDEO: Full boot sequence from power button to Ubuntu login -->
 https://github.com/user-attachments/assets/VIDEO_ID_HERE
-<!-- Replace: upload a short video of the boot sequence and paste the GitHub video link -->
-
-> ⛔ **Safety** — Always place the car on a solid stand during power tests. Wheels will spin. Turn off power before disconnecting anything. Match red (+) to positive, black to GND.
+<!-- Replace: upload boot sequence video and paste the GitHub video link -->
 
 ---
 
-## Part 2 — Software
+## Step 4 — Ubuntu Setup on the Jetson
 
-### 2.1 Ubuntu Basics
+### Login & Wi-Fi
 
-#### Login Credentials
+Logged into Ubuntu with the team credentials. Connected to the lab Wi-Fi network and confirmed internet access via Firefox.
 
-Replace `XX` with your car number:
+| Network | Password |
+|---------|----------|
+| `PinkPig` | `GetLost2022` |
+| `ECE_Lab` | `ECElab332` |
 
-| | Username | Password |
-|---|----------|----------|
-| **Monday** | `team1XX` | `robot1XXPA##!` |
-| **Wednesday** | `team3XX` | `robot3XXPA##@` |
+### Disabling Auto-Updates
 
-#### Wi-Fi Networks
-
-| Network | Password | Room |
-|---------|----------|------|
-| `PinkPig` | `GetLost2022` | PA 331 |
-| `ECE_Lab` | `ECElab332` | PA 332 |
-
-**Steps:**
-
-1. Log in to Ubuntu with the credentials above.
-2. Verify Wi-Fi connectivity. Open Firefox.
-3. Open Files → navigate to `~/Documents` → create a new subfolder → move `game.py` into it.
-4. Open **Software & Updates** → Updates tab → set "Automatically check for updates" to **Never**.
-5. Open a **Terminal** and pin it to the Favorites bar.
+Opened **Software & Updates** → Updates tab → set "Automatically check for updates" to **Never**. On an embedded platform like this, you don't want background updates eating bandwidth or breaking packages mid-project.
 
 ![Ubuntu Desktop](assets/images/ubuntu_desktop.jpg)
-<!-- Replace: screenshot of the Ubuntu desktop with Terminal pinned -->
+<!-- Replace: screenshot of the Ubuntu desktop on the Jetson -->
 
 ---
 
-### 2.2 Linux Commands
+## Step 5 — Terminal & Linux Basics
 
-#### Command Reference
+Opened a terminal and pinned it to the Favorites bar. This is where most of the real work happens on the Jetson — no need for a GUI for autonomous driving software.
 
-| Command | Description |
-|---------|-------------|
-| `ls -al` | List all files with permissions and hidden entries |
-| `cd folder_name` | Change into a directory |
-| `cd ..` | Go up one level |
-| `cd ~` | Go to home directory |
-| `mkdir name` | Create a new directory |
-| `cp f1 f2` | Copy a file |
-| `mv src dest` | Move or rename a file |
-| `rm -r dir` | Remove a directory recursively |
-| `grep pattern file` | Search for a pattern in a file |
-| `chmod a+rwx file` | Give all users read/write/execute |
-| `chmod 777 file` | Same as above (numeric form) |
-
-#### Terminal Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| `Tab` | Auto-complete file/folder names |
-| `Ctrl+C` | Kill running process |
-| `Ctrl+Z` | Suspend process |
-| `Ctrl+D` | Exit the shell |
-
-#### Exercise
+### Commands I Used
 
 ```bash
-# Navigate to your subfolder
-cd ~/Documents/your_subfolder
+# Created a working directory
+mkdir ~/Documents/week1
+cd ~/Documents/week1
 
-# Check file permissions
+# Copied the game script over
+cp ~/Downloads/game.py .
+
+# Checked permissions
 ls -l game.py
+# Output: -rw-r--r-- ... game.py
 
-# Make it executable
+# Made it executable
 chmod a+x game.py
 
-# Run it
+# Ran it
 python3 game.py
 ```
 
-![Terminal Commands](assets/images/terminal_commands.jpg)
-<!-- Replace: screenshot showing ls -l output and chmod in the terminal -->
+![Terminal — File Permissions](assets/images/terminal_permissions.jpg)
+<!-- Replace: screenshot showing ls -l and chmod output -->
 
-**Further reading:**
-- [Ubuntu CLI Tutorial (parts 4–6)](https://ubuntu.com/tutorials/command-line-for-beginners)
-- [linuxcommand.org](http://linuxcommand.org)
-- [Unix Quick Reference Card (PDF)](https://files.fosswire.com/2007/08/fwunixref.pdf)
+### Quick Reference
+
+| Command | What It Does |
+|---------|-------------|
+| `ls -al` | List everything including hidden files, with permissions |
+| `cd` / `cd ..` / `cd ~` | Navigate directories |
+| `mkdir` | Create a directory |
+| `cp` / `mv` / `rm -r` | Copy, move, remove |
+| `grep pattern file` | Search inside a file |
+| `chmod 755 file` | Set permissions (owner rwx, others rx) |
+| `Tab` | Auto-complete paths and commands |
+| `Ctrl+C` | Kill a running process |
 
 ---
 
-### 2.3 Text Editors
+## Step 6 — First Python Script on the Jetson
 
-Pick an editor and create `compute.py`:
+To confirm the Python environment is working, I wrote a simple script using `gedit`:
 
 ```bash
-gedit compute.py    # GUI editor — easiest
-nano compute.py     # Terminal-based, beginner-friendly
-vim compute.py      # Powerful, steep learning curve
+gedit compute.py
 ```
-
-Type the following:
 
 ```python
 # simple computation by python
@@ -226,65 +219,69 @@ c = a * b
 print("c = " + str(c))
 ```
 
-Save, close, and run:
+Saved, closed, and ran it:
 
 ```bash
 python3 compute.py
-# Expected output: c = 50
+# Output: c = 50
 ```
 
-![Text Editor](assets/images/text_editor.jpg)
-<!-- Replace: screenshot of your editor with compute.py open -->
+Small thing, but it confirms the Python 3 toolchain is intact and the Jetson's user environment is properly set up. From here, you can start installing ROS 2, OpenCV, or whatever the autonomous stack needs.
 
-<!-- VIDEO: Screen recording of writing, saving, and running compute.py -->
+![Running compute.py](assets/images/compute_py_output.jpg)
+<!-- Replace: screenshot of the terminal showing the python3 compute.py output -->
+
+<!-- VIDEO: Writing, saving, and running compute.py -->
 https://github.com/user-attachments/assets/VIDEO_ID_HERE
-<!-- Replace: upload a screen recording and paste the GitHub video link -->
+<!-- Replace: screen recording of the editor + terminal workflow -->
 
 ---
 
-## Carrier Board Reference
+## Carrier Board — LU v2.1
 
-The **E116 carrier board (LU v2.1)** sits between the Jetson and the Traxxas chassis, providing power management, sensor interfacing, and drive-train control.
+The carrier board is the glue between the Jetson and the Traxxas chassis. It's a custom PCB that handles everything the Jetson can't do on its own.
 
-![Carrier Board Functional Blocks](assets/images/carrier_board_diagram.jpg)
-<!-- Replace: annotated photo or block diagram of the carrier board -->
+![Carrier Board](assets/images/carrier_board.jpg)
+<!-- Replace: annotated photo of the carrier board -->
 
-| Block | Description |
+| Block | What It Does |
 |-------|-------------|
-| Main Power | Barrel connector input, voltage regulation, battery checker |
-| Jetson Signal Interface | Routes GPIO, I2C, UART to the Orin Nano header |
-| Drive Control | PWM outputs for motor ESC and steering servo |
-| Sensing & Control | Sensor connectors, external IMU interface |
-| Comm Ports | I2C and UART breakout headers |
-| Status LEDs 1–4 | Power, drive-train, and RC link indicators |
-| Mode Switch | Operating mode selector |
-| 0.92″ OLED Screen | On-board status display |
+| **Main Power** | Barrel connector input, voltage regulation, battery level checker |
+| **Jetson Signal Interface** | Routes GPIO, I2C, UART between the carrier and the Orin Nano |
+| **Drive Control** | PWM signals out to the motor ESC and steering servo |
+| **Sensing & Control** | Connectors for external sensors |
+| **Comm Ports** | I2C and UART breakout headers for peripherals |
+| **External IMU Interface** | Dedicated connector for an inertial measurement unit |
+| **Status LEDs 1–4** | Power, drive-train active, Jetson alive, RC link |
+| **Mode Switch** | Selects between operating modes |
+| **0.92″ OLED Screen** | Displays real-time status info on the board |
 
 ---
 
-## Safety Rules
+## Safety Notes
 
-### ⛔ Critical
+A few things I learned to be careful about during bring-up:
 
-- **DO NOT** stand on stools
-- **DO NOT** point sharp tools at people
-- **DO NOT** drop metal objects on powered circuits
-- Keep the car on a **solid stand** when wheels might spin
-- **Turn off power** before disconnecting any components
-- Match polarity: 🔴 **red = V+** · ⚫ **black = GND**
-- **No food or drink** in the lab
-
-### 💡 Best Practices
-
-- Unplug batteries and turn off RC handheld when leaving — draining damages LiPo cells
-- Check charge levels; rubber-band a battery once fully charged
-- Hold **connectors** (not wires) when unplugging cables
-- Tidy the bench and collect all tools before leaving
-- Log out from lab computers
+- **Always put the car on a stand** when the drive-train is powered — the wheels will spin and the car will launch off the bench if it's not secured.
+- **Turn off power before disconnecting anything.** Hotplugging DC connections can arc and damage connectors.
+- **Match polarity every time.** Red is positive, black is ground. Reversing a LiPo connection can destroy the battery and the board.
+- **Unplug batteries when done.** LiPo cells are damaged by deep discharge — don't leave them connected overnight.
+- **Hold connectors, not wires** when unplugging. The cable strain relief on these small connectors is minimal.
 
 ---
 
-## Repository Structure
+## What's Next
+
+With the hardware verified and Ubuntu running, the next steps are:
+
+- Install **ROS 2** and set up the catkin/colcon workspace
+- Calibrate the **Intel RealSense D435** and test depth streaming
+- Write a basic **motor control node** using PWM through the carrier board
+- Set up **SSH access** so the car can run headless without a monitor
+
+---
+
+## Repo Structure
 
 ```
 .
@@ -292,16 +289,20 @@ The **E116 carrier board (LU v2.1)** sits between the Jetson and the Traxxas cha
 ├── assets/
 │   ├── images/
 │   │   ├── lab_setup_banner.jpg
-│   │   ├── dmm_setup.jpg
+│   │   ├── car_top_view.jpg
+│   │   ├── car_side_view.jpg
 │   │   ├── ac_measurement.jpg
 │   │   ├── dc_measurement.jpg
-│   │   ├── car_components_annotated.jpg
-│   │   ├── component_comparison.jpg
-│   │   ├── car_powered_on.jpg
+│   │   ├── dmm_closeup.jpg
+│   │   ├── inspection_wiring.jpg
+│   │   ├── inspection_mounting.jpg
+│   │   ├── power_on_leds.jpg
+│   │   ├── rc_link.jpg
+│   │   ├── nvidia_boot_screen.jpg
 │   │   ├── ubuntu_desktop.jpg
-│   │   ├── terminal_commands.jpg
-│   │   ├── text_editor.jpg
-│   │   └── carrier_board_diagram.jpg
+│   │   ├── terminal_permissions.jpg
+│   │   ├── compute_py_output.jpg
+│   │   └── carrier_board.jpg
 │   └── videos/
 │       ├── boot_sequence.mp4
 │       └── compute_py_demo.mp4
